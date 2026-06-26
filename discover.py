@@ -13,7 +13,7 @@ LASTFM_API_KEY = os.environ["LASTFM_API_KEY"]
 LASTFM_BASE    = "https://ws.audioscrobbler.com/2.0/"
 MB_BASE        = "https://musicbrainz.org/ws/2/"
 MB_CONTACT     = os.environ["MB_CONTACT"]
-MB_REPO        = os.environ.get("MB_REPO", "github.com/phillipstr/r-dubstep-nmf")")
+MB_REPO        = os.environ.get("MB_REPO", "github.com/phillipstr/r-dubstep-nmf")"
 MB_HEADERS     = {"User-Agent": f"dubstep-friday-bot/1.0 ({MB_REPO} {MB_CONTACT})"}
 
 # MusicBrainz genre tags — kept broad; date filter does the recency work
