@@ -12,7 +12,7 @@ import requests
 LASTFM_API_KEY = os.environ["LASTFM_API_KEY"]
 LASTFM_BASE    = "https://ws.audioscrobbler.com/2.0/"
 MB_BASE        = "https://musicbrainz.org/ws/2/"
-MB_HEADERS     = {"User-Agent": "dubstep-friday-bot/1.0 (github.com/phillipstr/r-dubstep-nmf)"}
+MB_HEADERS     = {"User-Agent": f"dubstep-nmf-bot/1.0 ({MB_REPO} {MB_CONTACT})"}
 
 # Tags to pull from Last.fm (combined, deduped by ISRC)
 TAGS = ["dubstep", "brostep", "riddim", "future bass dubstep"]
