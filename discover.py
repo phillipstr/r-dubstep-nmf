@@ -274,7 +274,7 @@ def build_playlist() -> list[dict]:
                 releases_by_id[rid] = r
 
     # ── MB source 2: broad electronic search filtered by dubstep tags ────────
-    print(f"[mb] Running broad electronic/date search for additional coverage")
+    print("[mb] Running broad electronic/date search for additional coverage")
     broad_releases = fetch_recent_releases_by_date(since)
     added = 0
     for r in broad_releases:
@@ -395,7 +395,7 @@ def build_playlist() -> list[dict]:
 
             dedup_key = isrc if isrc else rough_key
             if dedup_key in seen_dedup_keys:
-                print(f"      ~ duplicate by ISRC, skipping")
+                print("      ~ duplicate by ISRC, skipping")
                 continue
 
             if rtype not in RELEASE_TYPE_PRIORITY:
