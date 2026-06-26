@@ -351,9 +351,15 @@ def build_playlist() -> list[dict]:
         print(f"  → {len(weekly_tracks)} tracks (will filter by release date via MB)")
 
         for t in weekly_tracks:
-            artist = t.get("artist", {}).get("#text", "").strip()
-            title  = t.get("name", "").strip()
+            # tag.gettoptracks returns artist as either a string or a dict
+            raw_artist = t.get("artist", "")
+            if isinstance(raw_artist, dict):
+                artist = raw_artist.get("name", raw_artist.get("#text", "")).strip()
+            else:
+                artist = str(raw_artist).strip()
+            title = t.get("name", "").strip()
             if not artist or not title:
+                print(f"    ~ skipping track with missing artist or title: {t}")
                 continue
 
             rough_key = f"{artist.lower()}|{title.lower()}"
