@@ -32,24 +32,31 @@ RELEASES_PER_TAG = 50
 RELEASE_WINDOW_DAYS = 8
 
 # MusicBrainz release types we care about, in priority order
-RELEASE_TYPE_PRIORITY = {"single": 0, "album": 1}
+RELEASE_TYPE_PRIORITY = {"single": 0, "ep": 1, "album": 2}
 
 # ── MusicBrainz helpers ───────────────────────────────────────────────────────
 
-def mb_get(path: str, **params) -> dict:
-    """Single MB request with error surfacing. Raises on non-2xx."""
-    resp = requests.get(
-        f"{MB_BASE}{path}",
-        params={"fmt": "json", **params},
-        headers=MB_HEADERS,
-        timeout=15,
-    )
-    if not resp.ok:
-        raise requests.HTTPError(
-            f"MusicBrainz {resp.status_code} for {path!r}: {resp.text[:200]}",
-            response=resp,
+def mb_get(path: str, retries: int = 3, **params) -> dict:
+    """Single MB request with retry on 503. Raises on persistent failure."""
+    for attempt in range(retries):
+        resp = requests.get(
+            f"{MB_BASE}{path}",
+            params={"fmt": "json", **params},
+            headers=MB_HEADERS,
+            timeout=15,
         )
-    return resp.json()
+        if resp.status_code == 503:
+            wait = 5 * (attempt + 1)
+            print(f"    [mb] 503 busy, retrying in {wait}s (attempt {attempt + 1}/{retries})")
+            time.sleep(wait)
+            continue
+        if not resp.ok:
+            raise requests.HTTPError(
+                f"MusicBrainz {resp.status_code} for {path!r}: {resp.text[:200]}",
+                response=resp,
+            )
+        return resp.json()
+    raise requests.HTTPError(f"MusicBrainz 503 persisted after {retries} retries for {path!r}")
 
 
 def fetch_recent_releases_by_tag(tag: str, since: date, limit: int = RELEASES_PER_TAG) -> list[dict]:
@@ -379,18 +386,22 @@ def build_playlist() -> list[dict]:
             releases = recording.get("releases", [])
             best_release = None
             best_priority = 99
-            for r in releases:
-                rg  = r.get("release-group", {})
-                rt  = rg.get("primary-type", "").lower()
-                pri = RELEASE_TYPE_PRIORITY.get(rt, 99)
-                rd  = r.get("date", "")
-                # Prefer better type; break ties by most recent date
-                if pri < best_priority or (
-                    pri == best_priority
-                    and rd > (best_release.get("date", "") if best_release else "")
-                ):
-                    best_priority = pri
-                    best_release  = r
+            try:
+                for r in releases:
+                    rg  = r.get("release-group", {})
+                    rt  = rg.get("primary-type", "").lower()
+                    pri = RELEASE_TYPE_PRIORITY.get(rt, 99)
+                    rd  = r.get("date", "")
+                    # Prefer better type; break ties by most recent date
+                    if pri < best_priority or (
+                        pri == best_priority
+                        and rd > (best_release.get("date", "") if best_release else "")
+                    ):
+                        best_priority = pri
+                        best_release  = r
+            except Exception as exc:
+                print(f"      ✗ error picking best release: {exc}")
+                continue
 
             rdate         = best_release.get("date", "") if best_release else ""
             rtype         = best_release.get("release-group", {}).get("primary-type", "").lower() if best_release else ""
@@ -459,4 +470,7 @@ def main():
 
 
 if __name__ == "__main__":
+    import sys
+    # Force line-buffered stdout so Actions logs appear in order
+    sys.stdout.reconfigure(line_buffering=True)
     main()
