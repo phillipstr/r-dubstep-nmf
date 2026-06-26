@@ -1,0 +1,56 @@
+name: New Dubstep Discovery
+
+on:
+  schedule:
+    # Every Friday at 10:00 UTC (adjust to your timezone)
+    - cron: "0 10 * * 5"
+  push:
+    branches-ignore:
+      - main  # avoid double-running on main; schedule covers actual run
+  workflow_dispatch: # allow manual trigger for testing
+
+permissions:
+  contents: write
+
+jobs:
+  lint:
+    uses: ./.github/workflows/lint.yml
+
+  discover:
+    needs: lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run discovery
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+        run: python discover.py
+
+      # Non-main branches: upload as a short-lived artifact for review
+      - name: Upload playlist artifact (non-main)
+        if: github.ref != 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: playlist-preview-${{ github.sha }}
+          path: playlists/
+          retention-days: 3
+
+      - name: Commit playlist to repo (main only)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name  "dubstep-friday-bot"
+          git config user.email "actions@github.com"
+          git add playlists/
+          git diff --cached --quiet || git commit -m "New Dubstep Discovery — $(date +'%Y-%m-%d')"
+          git push
