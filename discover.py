@@ -297,7 +297,7 @@ def build_playlist() -> list[dict]:
             print(f"    [mb] {artist} — {title}")
             recording = mb_search_recording(artist, title)
             if not recording:
-                print(f"      ✗ not found in MusicBrainz")
+                print("      ✗ not found in MusicBrainz")
                 continue
 
             # Extract release info from the recording
