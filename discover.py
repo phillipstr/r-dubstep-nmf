@@ -274,7 +274,7 @@ def build_playlist() -> list[dict]:
                 releases_by_id[rid] = r
 
     # ── MB source 2: broad electronic search filtered by dubstep tags ────────
-    print(f"[mb] Running broad electronic/date search for additional coverage")
+    print("[mb] Running broad electronic/date search for additional coverage")
     broad_releases = fetch_recent_releases_by_date(since)
     added = 0
     for r in broad_releases:
