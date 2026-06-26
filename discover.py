@@ -34,7 +34,7 @@ RELEASE_WINDOW_DAYS = 8
 # MusicBrainz release types we care about, in priority order
 RELEASE_TYPE_PRIORITY = {"single": 0, "album": 1}
 
-# MusicBrainz helpers
+# ── MusicBrainz helpers ───────────────────────────────────────────────────────
 
 def mb_get(path: str, **params) -> dict:
     """Single MB request with error surfacing. Raises on non-2xx."""
@@ -109,6 +109,61 @@ def fetch_recordings_for_release(release_id: str) -> list[dict]:
         return []
 
 
+def fetch_recent_releases_by_date(since: date, limit: int = 100) -> list[dict]:
+    """
+    Search MB for any electronic releases in the date window, regardless of tag.
+    We then check release-group tags to filter for dubstep-adjacent content.
+    This catches releases that are tagged 'electronic' broadly but not yet
+    tagged with a specific dubstep subgenre.
+    """
+    since_str = since.isoformat()
+    # Broader electronic umbrella — dubstep almost always falls under this
+    query = (
+        f'tag:"electronic" AND date:[{since_str} TO *] '
+        f'AND (primarytype:single OR primarytype:album)'
+    )
+    releases = []
+    offset = 0
+    per_page = 25
+
+    while len(releases) < limit:
+        try:
+            data = mb_get(
+                "release/",
+                query=query,
+                limit=per_page,
+                offset=offset,
+                inc="artist-credits+release-groups+labels+tags",
+            )
+        except Exception as exc:
+            print(f"  [mb] Error in broad date search: {exc}")
+            break
+
+        batch = data.get("releases", [])
+        if not batch:
+            break
+
+        # Filter to releases whose tags include a dubstep-adjacent term
+        dubstep_terms = {
+            "dubstep", "brostep", "riddim", "future bass", "wave dubstep",
+            "melodic dubstep", "tearout", "halftime", "bass music",
+        }
+        for r in batch:
+            release_tags = {t["name"].lower() for t in r.get("tags", [])}
+            rg_tags = {t["name"].lower() for t in r.get("release-group", {}).get("tags", [])}
+            all_tags = release_tags | rg_tags
+            if all_tags & dubstep_terms:
+                releases.append(r)
+
+        offset += per_page
+        time.sleep(1.1)
+
+        if offset >= data.get("release-count", 0):
+            break
+
+    return releases[:limit]
+
+
 def mb_search_recording(artist: str, title: str) -> dict | None:
     """Search MB for a single recording by artist + title."""
     query = f'recording:"{title}" AND artist:"{artist}"'
@@ -129,7 +184,7 @@ def mb_search_recording(artist: str, title: str) -> dict | None:
         return None
 
 
-# Last.fm helpers
+# ── Last.fm helpers ───────────────────────────────────────────────────────────
 
 def lastfm_get(method: str, **params) -> dict:
     resp = requests.get(
@@ -141,16 +196,17 @@ def lastfm_get(method: str, **params) -> dict:
     return resp.json()
 
 
-def fetch_lastfm_weekly_tracks(tag: str) -> list[dict]:
+def fetch_lastfm_recent_tracks(tag: str, limit: int = 50) -> list[dict]:
     """
-    Fetch Last.fm's weekly track chart for a tag.
-    This is time-windowed to the past 7 days, unlike toptracks which is all-time.
+    Fetch top tracks for a Last.fm tag, then filter by MB release date.
+    We use a small limit so only currently-active tracks surface —
+    all-time classics won't appear in the top 50 of niche tags as often.
     """
     try:
-        data = lastfm_get("tag.getweeklytrackchart", tag=tag)
-        return data.get("weeklytrackchart", {}).get("track", [])
+        data = lastfm_get("tag.gettoptracks", tag=tag, limit=limit)
+        return data.get("tracks", {}).get("track", [])
     except Exception as exc:
-        print(f"  [lastfm] Error fetching weekly chart for '{tag}': {exc}")
+        print(f"  [lastfm] Error fetching tracks for '{tag}': {exc}")
         return []
 
 
@@ -163,7 +219,7 @@ def fetch_lastfm_url(artist: str, title: str) -> str | None:
         return None
 
 
-# Date helpers
+# ── Date helpers ──────────────────────────────────────────────────────────────
 
 def parse_date(d: str) -> date | None:
     if re.match(r"\d{4}-\d{2}-\d{2}", d):
@@ -195,7 +251,7 @@ def is_recent(release_date_str: str | None, window_days: int = RELEASE_WINDOW_DA
     return (date.today() - rd).days <= window_days
 
 
-# Main pipeline
+# ── Main pipeline ─────────────────────────────────────────────────────────────
 
 def build_playlist() -> list[dict]:
     since = date.today() - timedelta(days=RELEASE_WINDOW_DAYS)
@@ -205,7 +261,7 @@ def build_playlist() -> list[dict]:
     seen_dedup_keys: set[str] = set()
     results: list[dict] = []
 
-    # Source 1: MusicBrainz new releases by tag
+    # ── Source 1: MusicBrainz new releases by tag ─────────────────────────────
     releases_by_id: dict[str, dict] = {}
 
     for tag in MB_TAGS:
@@ -216,6 +272,17 @@ def build_playlist() -> list[dict]:
             rid = r.get("id")
             if rid and rid not in releases_by_id:
                 releases_by_id[rid] = r
+
+    # ── MB source 2: broad electronic search filtered by dubstep tags ────────
+    print(f"[mb] Running broad electronic/date search for additional coverage")
+    broad_releases = fetch_recent_releases_by_date(since)
+    added = 0
+    for r in broad_releases:
+        rid = r.get("id")
+        if rid and rid not in releases_by_id:
+            releases_by_id[rid] = r
+            added += 1
+    print(f"  → {added} additional releases from broad search")
 
     print(f"\n[mb] {len(releases_by_id)} unique releases to process")
 
@@ -276,12 +343,12 @@ def build_playlist() -> list[dict]:
             })
 
     # ── Source 2: Last.fm weekly tag chart ────────────────────────────────────
-    print(f"\n[lastfm] Fetching weekly charts for {len(LASTFM_TAGS)} tags")
+    print(f"\n[lastfm] Fetching recent tracks for {len(LASTFM_TAGS)} tags (filtered by MB release date)")
 
     for tag in LASTFM_TAGS:
         print(f"  tag: {tag}")
-        weekly_tracks = fetch_lastfm_weekly_tracks(tag)
-        print(f"  → {len(weekly_tracks)} tracks in weekly chart")
+        weekly_tracks = fetch_lastfm_recent_tracks(tag)
+        print(f"  → {len(weekly_tracks)} tracks (will filter by release date via MB)")
 
         for t in weekly_tracks:
             artist = t.get("artist", {}).get("#text", "").strip()
@@ -381,6 +448,7 @@ def main():
     latest = out_dir / "latest.json"
     latest.write_text(json.dumps(playlist, indent=2, ensure_ascii=False))
     print(f"✅ Also updated {latest}")
+
 
 if __name__ == "__main__":
     main()
