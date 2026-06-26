@@ -1,0 +1,40 @@
+name: New Dubstep Discovery
+
+on:
+  schedule:
+    # Every Friday at 10:00 UTC (adjust to your timezone)
+    - cron: "0 10 * * 5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run discovery
+        env:
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+        run: python discover.py
+
+      - name: Commit playlist to repo
+        run: |
+          git config user.name  "dubstep-friday-bot"
+          git config user.email "actions@github.com"
+          git add playlists/
+          # Only commit if something actually changed
+          git diff --cached --quiet || git commit -m "🎵 New Dubstep Friday — $(date +'%Y-%m-%d')"
+          git push
