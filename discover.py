@@ -59,20 +59,34 @@ def fetch_tag_tracks(tag: str, limit: int = TRACKS_PER_TAG) -> list[dict]:
 
 # MusicBrainz helpers
 
+def mb_get(path: str, **params) -> dict:
+    """Single MB request with error surfacing. Raises on non-2xx."""
+    resp = requests.get(
+        f"{MB_BASE}{path}",
+        params={"fmt": "json", **params},
+        headers=MB_HEADERS,
+        timeout=15,
+    )
+    if not resp.ok:
+        raise requests.HTTPError(
+            f"MusicBrainz {resp.status_code} for {path!r}: {resp.text[:200]}",
+            response=resp,
+        )
+    return resp.json()
+ 
+ 
 def mb_search_recording(artist: str, title: str) -> dict | None:
-    """Search MusicBrainz for a recording and return the best match."""
+    """Search MusicBrainz for a recording and return the best match, or None."""
     query = f'recording:"{title}" AND artist:"{artist}"'
     try:
-        resp = requests.get(
-            f"{MB_BASE}recording/",
-            params={"query": query, "limit": 1, "fmt": "json"},
-            headers=MB_HEADERS,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        recordings = resp.json().get("recordings", [])
+        data = mb_get("recording/", query=query, limit=1, inc="releases+release-groups")
+        recordings = data.get("recordings", [])
         return recordings[0] if recordings else None
-    except Exception:
+    except requests.HTTPError as exc:
+        print(f"    [mb] HTTP error searching '{artist} — {title}': {exc}")
+        return None
+    except Exception as exc:
+        print(f"    [mb] Unexpected error searching '{artist} — {title}': {exc}")
         return None
 
 
