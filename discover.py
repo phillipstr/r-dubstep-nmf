@@ -7,19 +7,25 @@ from pathlib import Path
 
 import requests
 
-# Config 
+# Config
 
 LASTFM_API_KEY = os.environ["LASTFM_API_KEY"]
 LASTFM_BASE    = "https://ws.audioscrobbler.com/2.0/"
 MB_BASE        = "https://musicbrainz.org/ws/2/"
 MB_CONTACT     = os.environ["MB_CONTACT"]
-MB_REPO        = os.environ.get("MB_REPO", "github.com/phillipstr/r-dubstep-nmf")
+MB_REPO        = os.environ.get("MB_REPO", "github.com/phillipstr/r-dubstep-nmf")")
 MB_HEADERS     = {"User-Agent": f"dubstep-friday-bot/1.0 ({MB_REPO} {MB_CONTACT})"}
 
-# MusicBrainz genre tags to search for new releases
-MB_TAGS = ["dubstep", "brostep", "riddim", "future bass"]
+# MusicBrainz genre tags — kept broad; date filter does the recency work
+MB_TAGS = [
+    "dubstep", "brostep", "riddim", "future bass",
+    "wave dubstep", "melodic dubstep", "tearout", "halftime",
+]
 
-# How many releases to fetch per tag from MB
+# Last.fm tags for weekly chart supplementation
+LASTFM_TAGS = ["dubstep", "brostep", "riddim"]
+
+# How many releases to fetch per MB tag
 RELEASES_PER_TAG = 50
 
 # Only keep tracks released within the last N days
@@ -47,12 +53,8 @@ def mb_get(path: str, **params) -> dict:
 
 
 def fetch_recent_releases_by_tag(tag: str, since: date, limit: int = RELEASES_PER_TAG) -> list[dict]:
-    """
-    Search MB for releases with the given tag released on or after `since`.
-    Returns a list of release dicts.
-    """
+    """Search MB for releases with the given tag released on or after `since`."""
     since_str = since.isoformat()
-    # MB Lucene query: tag + date range + only single/album primary types
     query = (
         f'tag:"{tag}" AND date:[{since_str} TO *] '
         f'AND (primarytype:single OR primarytype:album)'
@@ -71,10 +73,10 @@ def fetch_recent_releases_by_tag(tag: str, since: date, limit: int = RELEASES_PE
                 inc="artist-credits+release-groups+labels",
             )
         except requests.HTTPError as exc:
-            print(f"  [mb] HTTP error fetching releases for tag '{tag}': {exc}")
+            print(f"  [mb] HTTP error for tag '{tag}': {exc}")
             break
         except Exception as exc:
-            print(f"  [mb] Unexpected error for tag '{tag}': {exc}")
+            print(f"  [mb] Error for tag '{tag}': {exc}")
             break
 
         batch = data.get("releases", [])
@@ -82,7 +84,7 @@ def fetch_recent_releases_by_tag(tag: str, since: date, limit: int = RELEASES_PE
             break
         releases.extend(batch)
         offset += per_page
-        time.sleep(1.1)  # MB rate limit
+        time.sleep(1.1)
 
         if offset >= data.get("release-count", 0):
             break
@@ -103,8 +105,28 @@ def fetch_recordings_for_release(release_id: str) -> list[dict]:
             tracks.extend(medium.get("tracks", []))
         return tracks
     except Exception as exc:
-        print(f"  [mb] Error fetching recordings for release {release_id}: {exc}")
+        print(f"  [mb] Error fetching recordings for {release_id}: {exc}")
         return []
+
+
+def mb_search_recording(artist: str, title: str) -> dict | None:
+    """Search MB for a single recording by artist + title."""
+    query = f'recording:"{title}" AND artist:"{artist}"'
+    try:
+        data = mb_get(
+            "recording/",
+            query=query,
+            limit=1,
+            inc="releases+release-groups+isrcs",
+        )
+        recordings = data.get("recordings", [])
+        return recordings[0] if recordings else None
+    except requests.HTTPError as exc:
+        print(f"    [mb] HTTP error searching '{artist} — {title}': {exc}")
+        return None
+    except Exception as exc:
+        print(f"    [mb] Error searching '{artist} — {title}': {exc}")
+        return None
 
 
 # Last.fm helpers
@@ -119,6 +141,19 @@ def lastfm_get(method: str, **params) -> dict:
     return resp.json()
 
 
+def fetch_lastfm_weekly_tracks(tag: str) -> list[dict]:
+    """
+    Fetch Last.fm's weekly track chart for a tag.
+    This is time-windowed to the past 7 days, unlike toptracks which is all-time.
+    """
+    try:
+        data = lastfm_get("tag.getweeklytrackchart", tag=tag)
+        return data.get("weeklytrackchart", {}).get("track", [])
+    except Exception as exc:
+        print(f"  [lastfm] Error fetching weekly chart for '{tag}': {exc}")
+        return []
+
+
 def fetch_lastfm_url(artist: str, title: str) -> str | None:
     """Look up a track on Last.fm and return its URL."""
     try:
@@ -128,7 +163,7 @@ def fetch_lastfm_url(artist: str, title: str) -> str | None:
         return None
 
 
-# Release date filter
+# Date helpers
 
 def parse_date(d: str) -> date | None:
     if re.match(r"\d{4}-\d{2}-\d{2}", d):
@@ -142,7 +177,12 @@ def parse_date(d: str) -> date | None:
         except ValueError:
             return None
     if re.match(r"\d{4}$", d):
-        return date(int(d), 1, 1)
+        # Year-only: if it's the current year, treat as potentially recent
+        # (MB often only has year for very new releases not yet fully catalogued)
+        year = int(d)
+        if year == date.today().year:
+            return date.today()  # conservative: assume today so it passes the window
+        return date(year, 1, 1)
     return None
 
 
@@ -161,41 +201,37 @@ def build_playlist() -> list[dict]:
     since = date.today() - timedelta(days=RELEASE_WINDOW_DAYS)
     print(f"[config] Searching for releases since {since}\n")
 
-    # Collect releases keyed by MB release ID to dedupe across tags
+    seen_release_ids: set[str] = set()
+    seen_dedup_keys: set[str] = set()
+    results: list[dict] = []
+
+    # Source 1: MusicBrainz new releases by tag
     releases_by_id: dict[str, dict] = {}
 
     for tag in MB_TAGS:
         print(f"[mb] Searching releases for tag: {tag}")
         releases = fetch_recent_releases_by_tag(tag, since)
         print(f"  → {len(releases)} releases found")
-
         for r in releases:
             rid = r.get("id")
-            if not rid or rid in releases_by_id:
-                continue
-            releases_by_id[rid] = r
+            if rid and rid not in releases_by_id:
+                releases_by_id[rid] = r
 
-    print(f"\n[mb] {len(releases_by_id)} unique releases to process\n")
-
-    results: list[dict] = []
-    seen_isrcs: set[str] = set()
+    print(f"\n[mb] {len(releases_by_id)} unique releases to process")
 
     for release in releases_by_id.values():
-        rid         = release.get("id")
-        rdate       = release.get("date", "")
-        rg          = release.get("release-group", {})
-        rtype       = rg.get("primary-type", "").lower()
+        rid           = release.get("id")
+        rdate         = release.get("date", "")
+        rg            = release.get("release-group", {})
+        rtype         = rg.get("primary-type", "").lower()
         release_title = release.get("title", "")
 
-        # Artist name from artist-credits
         artist_credits = release.get("artist-credit", [])
         artist = "".join(
             (ac.get("name") or ac.get("artist", {}).get("name", "")) + ac.get("joinphrase", "")
-            for ac in artist_credits
-            if isinstance(ac, dict)
+            for ac in artist_credits if isinstance(ac, dict)
         ).strip()
 
-        # Label
         label = None
         for li in release.get("label-info", []):
             label = li.get("label", {}).get("name")
@@ -203,7 +239,7 @@ def build_playlist() -> list[dict]:
                 break
 
         if rtype not in RELEASE_TYPE_PRIORITY:
-            print(f"  ✗ {artist} — {release_title} (type: {rtype or 'unknown'}, skipped)")
+            print(f"  ✗ {artist} — {release_title} (type: {rtype or 'unknown'})")
             continue
 
         if not is_recent(rdate):
@@ -211,8 +247,8 @@ def build_playlist() -> list[dict]:
             continue
 
         print(f"  ✓ {artist} — {release_title} ({rtype}, {rdate})")
+        seen_release_ids.add(rid)
 
-        # Fetch individual recordings for this release to get ISRCs
         tracks = fetch_recordings_for_release(rid)
         for track in tracks:
             rec   = track.get("recording", {})
@@ -220,27 +256,103 @@ def build_playlist() -> list[dict]:
             isrcs = rec.get("isrcs", [])
             isrc  = isrcs[0] if isrcs else None
 
-            # Dedupe by ISRC if available
             dedup_key = isrc if isrc else f"{artist.lower()}|{title.lower()}"
-            if dedup_key in seen_isrcs:
+            if dedup_key in seen_dedup_keys:
                 continue
-            seen_isrcs.add(dedup_key)
+            seen_dedup_keys.add(dedup_key)
 
-            lastfm_url = fetch_lastfm_url(artist, title)
+            results.append({
+                "title":             title,
+                "artist":            artist,
+                "release_type":      rtype,
+                "release_title":     release_title,
+                "isrc":              isrc,
+                "mb_release_id":     rid,
+                "mb_recording_id":   rec.get("id"),
+                "release_date":      rdate,
+                "label":             label,
+                "lastfm_url":        fetch_lastfm_url(artist, title),
+                "source":            "musicbrainz",
+            })
 
-            entry = {
-                "title":        title,
-                "artist":       artist,
-                "release_type": rtype,
-                "release_title": release_title,
-                "isrc":         isrc,
-                "mb_release_id": rid,
-                "mb_recording_id": rec.get("id"),
-                "release_date": rdate,
-                "label":        label,
-                "lastfm_url":   lastfm_url,
-            }
-            results.append(entry)
+    # ── Source 2: Last.fm weekly tag chart ────────────────────────────────────
+    print(f"\n[lastfm] Fetching weekly charts for {len(LASTFM_TAGS)} tags")
+
+    for tag in LASTFM_TAGS:
+        print(f"  tag: {tag}")
+        weekly_tracks = fetch_lastfm_weekly_tracks(tag)
+        print(f"  → {len(weekly_tracks)} tracks in weekly chart")
+
+        for t in weekly_tracks:
+            artist = t.get("artist", {}).get("#text", "").strip()
+            title  = t.get("name", "").strip()
+            if not artist or not title:
+                continue
+
+            # Skip if we already have this track from MB
+            rough_key = f"{artist.lower()}|{title.lower()}"
+            if rough_key in seen_dedup_keys:
+                continue
+
+            print(f"    [mb] {artist} — {title}")
+            recording = mb_search_recording(artist, title)
+            if not recording:
+                print(f"      ✗ not found in MusicBrainz")
+                continue
+
+            # Extract release info from the recording
+            releases = recording.get("releases", [])
+            rdate, rtype, release_title, label, isrc = None, None, None, None, None
+
+            # Pick best release (prefer singles, then earliest date)
+            best_release = None
+            best_priority = 99
+            for r in releases:
+                rg    = r.get("release-group", {})
+                rt    = rg.get("primary-type", "").lower()
+                pri   = RELEASE_TYPE_PRIORITY.get(rt, 99)
+                if pri < best_priority:
+                    best_priority  = pri
+                    best_release   = r
+                    rtype          = rt
+
+            if best_release:
+                rdate         = best_release.get("date", "")
+                release_title = best_release.get("title", "")
+
+            isrcs = recording.get("isrcs", [])
+            isrc  = isrcs[0] if isrcs else None
+
+            dedup_key = isrc if isrc else rough_key
+            if dedup_key in seen_dedup_keys:
+                continue
+
+            if rtype not in RELEASE_TYPE_PRIORITY:
+                print(f"      ✗ skipped (type: {rtype or 'unknown'})")
+                continue
+
+            if not is_recent(rdate):
+                print(f"      ✗ skipped (date: {rdate or 'unknown'}, outside window)")
+                continue
+
+            seen_dedup_keys.add(dedup_key)
+            print(f"      ✓ added ({rtype}, {rdate})")
+
+            results.append({
+                "title":           title,
+                "artist":          artist,
+                "release_type":    rtype,
+                "release_title":   release_title,
+                "isrc":            isrc,
+                "mb_release_id":   best_release.get("id") if best_release else None,
+                "mb_recording_id": recording.get("id"),
+                "release_date":    rdate,
+                "label":           label,
+                "lastfm_url":      t.get("url"),
+                "source":          "lastfm_weekly",
+            })
+
+            time.sleep(1.1)  # MB rate limit between recording searches
 
     # Sort: singles first, then album tracks; newest-first within each group
     final = sorted(results, key=lambda x: x.get("release_date") or "", reverse=True)
@@ -269,7 +381,6 @@ def main():
     latest = out_dir / "latest.json"
     latest.write_text(json.dumps(playlist, indent=2, ensure_ascii=False))
     print(f"✅ Also updated {latest}")
-
 
 if __name__ == "__main__":
     main()
