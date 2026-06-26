@@ -274,7 +274,7 @@ def build_playlist() -> list[dict]:
                 releases_by_id[rid] = r
 
     # ── MB source 2: broad electronic search filtered by dubstep tags ────────
-    print("[mb] Running broad electronic/date search for additional coverage")
+    print(f"[mb] Running broad electronic/date search for additional coverage")
     broad_releases = fetch_recent_releases_by_date(since)
     added = 0
     for r in broad_releases:
@@ -356,46 +356,50 @@ def build_playlist() -> list[dict]:
             if not artist or not title:
                 continue
 
-            # Skip if we already have this track from MB
             rough_key = f"{artist.lower()}|{title.lower()}"
             if rough_key in seen_dedup_keys:
+                print(f"    ~ {artist} — {title} (already seen, skipping)")
                 continue
 
             print(f"    [mb] {artist} — {title}")
             recording = mb_search_recording(artist, title)
+            time.sleep(1.1)  # MB rate limit — always sleep after a search
+
             if not recording:
                 print("      ✗ not found in MusicBrainz")
                 continue
 
-            # Extract release info from the recording
+            # Extract release info — pick best release type, then most recent date
             releases = recording.get("releases", [])
-            rdate, rtype, release_title, label, isrc = None, None, None, None, None
-
-            # Pick best release (prefer singles, then earliest date)
             best_release = None
             best_priority = 99
             for r in releases:
-                rg    = r.get("release-group", {})
-                rt    = rg.get("primary-type", "").lower()
-                pri   = RELEASE_TYPE_PRIORITY.get(rt, 99)
-                if pri < best_priority:
-                    best_priority  = pri
-                    best_release   = r
-                    rtype          = rt
+                rg  = r.get("release-group", {})
+                rt  = rg.get("primary-type", "").lower()
+                pri = RELEASE_TYPE_PRIORITY.get(rt, 99)
+                rd  = r.get("date", "")
+                # Prefer better type; break ties by most recent date
+                if pri < best_priority or (
+                    pri == best_priority
+                    and rd > (best_release.get("date", "") if best_release else "")
+                ):
+                    best_priority = pri
+                    best_release  = r
 
-            if best_release:
-                rdate         = best_release.get("date", "")
-                release_title = best_release.get("title", "")
+            rdate         = best_release.get("date", "") if best_release else ""
+            rtype         = best_release.get("release-group", {}).get("primary-type", "").lower() if best_release else ""
+            release_title = best_release.get("title", "") if best_release else ""
 
             isrcs = recording.get("isrcs", [])
             isrc  = isrcs[0] if isrcs else None
 
             dedup_key = isrc if isrc else rough_key
             if dedup_key in seen_dedup_keys:
+                print(f"      ~ duplicate by ISRC, skipping")
                 continue
 
             if rtype not in RELEASE_TYPE_PRIORITY:
-                print(f"      ✗ skipped (type: {rtype or 'unknown'})")
+                print(f"      ✗ skipped (type: {rtype or 'unknown'}, {len(releases)} releases checked)")
                 continue
 
             if not is_recent(rdate):
@@ -414,12 +418,10 @@ def build_playlist() -> list[dict]:
                 "mb_release_id":   best_release.get("id") if best_release else None,
                 "mb_recording_id": recording.get("id"),
                 "release_date":    rdate,
-                "label":           label,
+                "label":           None,
                 "lastfm_url":      t.get("url"),
                 "source":          "lastfm_weekly",
             })
-
-            time.sleep(1.1)  # MB rate limit between recording searches
 
     # Sort: singles first, then album tracks; newest-first within each group
     final = sorted(results, key=lambda x: x.get("release_date") or "", reverse=True)
