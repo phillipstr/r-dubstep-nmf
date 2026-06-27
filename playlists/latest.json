@@ -1,0 +1,54 @@
+[
+  {
+    "title": "Clouds",
+    "artist": "Boundary Operator",
+    "release_type": "single",
+    "release_title": "Clouds",
+    "isrc": null,
+    "mb_release_id": "49aacde9-20cb-4964-9f3c-0a8f7990a3fd",
+    "mb_recording_id": "4f198757-8e5e-4320-9f44-c932340e0e63",
+    "release_date": "2026",
+    "label": null,
+    "lastfm_url": null,
+    "source": "musicbrainz"
+  },
+  {
+    "title": "The 1st Amendment",
+    "artist": "JPEGMAFIA",
+    "release_type": "album",
+    "release_title": "EXPERIMENTAL RAP",
+    "isrc": "QM4TW2635085",
+    "mb_release_id": "d5df7552-008b-475a-83b6-17d33277e172",
+    "mb_recording_id": "8e53d9d3-e449-4769-a5f3-f083950b7ab9",
+    "release_date": "2026-06-19",
+    "label": null,
+    "lastfm_url": "https://www.last.fm/music/JPEGMAFIA/_/The+1st+Amendment",
+    "source": "lastfm_weekly"
+  },
+  {
+    "title": "Meet the Dealers",
+    "artist": "JPEGMAFIA",
+    "release_type": "album",
+    "release_title": "EXPERIMENTAL RAP",
+    "isrc": "QM4TW2635067",
+    "mb_release_id": "d5df7552-008b-475a-83b6-17d33277e172",
+    "mb_recording_id": "2b4d1df2-72f9-4c49-a0a9-3d4fe82727a7",
+    "release_date": "2026-06-19",
+    "label": null,
+    "lastfm_url": "https://www.last.fm/music/JPEGMAFIA/_/Meet+the+Dealers",
+    "source": "lastfm_weekly"
+  },
+  {
+    "title": "No Strippers in Heaven",
+    "artist": "JPEGMAFIA",
+    "release_type": "album",
+    "release_title": "EXPERIMENTAL RAP",
+    "isrc": "QM4TW2635082",
+    "mb_release_id": "d5df7552-008b-475a-83b6-17d33277e172",
+    "mb_recording_id": "cb1a4898-b2a2-4e80-a6dd-c7ad38b3e9da",
+    "release_date": "2026-06-19",
+    "label": null,
+    "lastfm_url": "https://www.last.fm/music/JPEGMAFIA/_/No+Strippers+in+Heaven",
+    "source": "lastfm_weekly"
+  }
+]
