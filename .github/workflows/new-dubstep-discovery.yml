@@ -35,6 +35,8 @@ jobs:
       - name: Run discovery
         env:
           LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          MB_CONTACT: ${{ secrets.MB_CONTACT }}
+          MB_REPO: ${{ github.repository }}
         run: python discover.py
 
       # Non-main branches: upload as a short-lived artifact for review
